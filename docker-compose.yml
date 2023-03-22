@@ -1,0 +1,11 @@
+# Requires Docker Compose 1.19+ and nvidia-docker2
+version: "2.3"
+
+services:
+    build_js:
+        build: .
+        image: emscripten
+        volumes:
+            - .:/opencv
+        working_dir: /opencv
+        command: ["./build.sh"]
