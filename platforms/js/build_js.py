@@ -252,6 +252,8 @@ if __name__ == "__main__":
     parser.add_argument('--config', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'opencv_js.config.py'),
                         help="Specify configuration file with own list of exported into JS functions")
     parser.add_argument('--webnn', action="store_true", help="Enable WebNN Backend")
+    parser.add_argument('-DCMAKE_TOOLCHAIN_FILE', help="")
+    parser.add_argument('-DCMAKE_CROSSCOMPILING_EMULATOR', help="")
 
     args = parser.parse_args()
 
