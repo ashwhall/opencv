@@ -112,7 +112,7 @@ public:
                     op == OPERATION::LESS_EQUAL
             );
         if (op == OPERATION::MAX || op == OPERATION::MIN || op == OPERATION::SUM ||
-            op == OPERATION::PROD || op == OPERATION::DIV)
+            op == OPERATION::PROD || op == OPERATION::DIV || op == OPERATION::ADD)
             return backendId == DNN_BACKEND_OPENCV || backendId == DNN_BACKEND_CUDA;
         return backendId == DNN_BACKEND_OPENCV;
     }
@@ -681,23 +681,36 @@ public:
                 return Ptr<BackendNode>();
         }
 
-        auto op_ = [this] {
-            switch (op) {
-                case OPERATION::MAX: return cuda4dnn::EltwiseOpType::MAX;
-                case OPERATION::MIN: return cuda4dnn::EltwiseOpType::MIN;
-                case OPERATION::SUM: return cuda4dnn::EltwiseOpType::SUM;
-                case OPERATION::PROD: return cuda4dnn::EltwiseOpType::PRODUCT;
-                case OPERATION::DIV: return cuda4dnn::EltwiseOpType::DIV;
-                default: CV_Error(Error::StsNotImplemented, "Other operators except MAX, MIN, SUM, PRODUCT and DIV are not supported with cuda.");
-            }
-        }();
+        cuda4dnn::EltwiseOpType op_ = cuda4dnn::EltwiseOpType::SUM;
+        switch (op) {
+            case OPERATION::MAX:
+                op_ = cuda4dnn::EltwiseOpType::MAX;
+                break;
+            case OPERATION::MIN:
+                op_ = cuda4dnn::EltwiseOpType::MIN;
+                break;
+            case OPERATION::SUM:
+                op_ = cuda4dnn::EltwiseOpType::SUM;
+                break;
+            case OPERATION::PROD:
+                op_ = cuda4dnn::EltwiseOpType::PRODUCT;
+                break;
+            case OPERATION::DIV:
+                op_ = cuda4dnn::EltwiseOpType::DIV;
+                break;
+            case OPERATION::ADD:
+                op_ = cuda4dnn::EltwiseOpType::SUM;
+                break;
+            default: return Ptr<BackendNode>(); // return empty cuda_node if the EltwiseOpType is unsupported type.
+        };
 
         return make_cuda_node<cuda4dnn::EltwiseOp>(preferableTarget, std::move(context->stream), op_, std::vector<float>());
     }
 #endif
 
 #ifdef HAVE_CANN
-    virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputsWrapper, const int index, const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
+    virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputsWrapper,
+                                      const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
     {
         CV_Assert(inputsWrapper.size() == 2);
         CV_Assert(nodes.size() == 2);
@@ -714,22 +727,22 @@ public:
         // add, mul, div, max, min
         switch (op)
         {
-#define BUILD_CANN_ELTWISE_OP(op_type, class_name, op_name)      \
-            case op_type: {                                      \
-                auto eltwise_op =                                \
-                  std::make_shared<ge::op::class_name>(op_name); \
-                eltwise_op->set_input_x1_by_name(*op_x1, "y");   \
-                eltwise_op->set_input_x2_by_name(*op_x2, "y");   \
-                eltwise_op->update_input_desc_x1(*x1_desc);      \
-                eltwise_op->update_input_desc_x2(*x2_desc);      \
-                eltwise_op->update_output_desc_y(*output_desc);  \
-                eltwise_operator = eltwise_op;                   \
+#define BUILD_CANN_ELTWISE_OP(op_type, class_name, op_name)                 \
+            case op_type: {                                                 \
+                auto eltwise_op =                                           \
+                  std::make_shared<ge::op::class_name>(op_name);            \
+                eltwise_op->set_input_x1_by_name(*op_x1, x1->name.c_str()); \
+                eltwise_op->set_input_x2_by_name(*op_x2, x2->name.c_str()); \
+                eltwise_op->update_input_desc_x1(*x1_desc);                 \
+                eltwise_op->update_input_desc_x2(*x2_desc);                 \
+                eltwise_op->update_output_desc_y(*output_desc);             \
+                eltwise_operator = eltwise_op;                              \
             } break;
-            BUILD_CANN_ELTWISE_OP(OPERATION::ADD,  Add,     cv::format("add_%d", index));
-            BUILD_CANN_ELTWISE_OP(OPERATION::PROD, Mul,     cv::format("mul_%d", index));
-            BUILD_CANN_ELTWISE_OP(OPERATION::DIV,  Xdivy,   cv::format("div_%d", index));
-            BUILD_CANN_ELTWISE_OP(OPERATION::MAX,  Maximum, cv::format("max_%d", index));
-            BUILD_CANN_ELTWISE_OP(OPERATION::MIN,  Minimum, cv::format("min_%d", index));
+            BUILD_CANN_ELTWISE_OP(OPERATION::ADD,  Add,     name);
+            BUILD_CANN_ELTWISE_OP(OPERATION::PROD, Mul,     name);
+            BUILD_CANN_ELTWISE_OP(OPERATION::DIV,  Xdivy,   name);
+            BUILD_CANN_ELTWISE_OP(OPERATION::MAX,  Maximum, name);
+            BUILD_CANN_ELTWISE_OP(OPERATION::MIN,  Minimum, name);
 #undef BUILD_CANN_ELTWISE_OP
             default: CV_Error(Error::StsNotImplemented, "Unsupported eltwise operation");
         }

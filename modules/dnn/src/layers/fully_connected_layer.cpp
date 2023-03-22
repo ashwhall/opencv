@@ -115,6 +115,8 @@ public:
                 biasMat = Mat::zeros(1, oriMat.size[oriMat.dims - 2], weightsMat.type());
             else
                 biasMat = Mat::zeros(1, numOutput, weightsMat.type());
+
+            transB = !transB;
         }
     }
 
@@ -155,7 +157,6 @@ public:
         }
         else
         {
-            CV_Assert(!transA && !transB);
             CV_CheckEQ(inputsTmp.size(), (size_t)1, "");
             CV_CheckEQ(blobs[0].dims, 2, "");
             if(isMatMul)
@@ -183,7 +184,7 @@ public:
             return axis == 1 && !tranAorB;
 #endif
         return backendId == DNN_BACKEND_OPENCV ||
-               (backendId == DNN_BACKEND_CUDA && !tranAorB) ||
+               backendId == DNN_BACKEND_CUDA ||
                (backendId == DNN_BACKEND_HALIDE && haveHalide() && axis == 1 && !tranAorB) ||
                (backendId == DNN_BACKEND_WEBNN && axis == 1 && !tranAorB) ||
                backendId == DNN_BACKEND_CANN;;
@@ -527,7 +528,6 @@ public:
 
         if (!blobs.empty())
         {
-            CV_Assert(!transA && !transB);
             int inp1Dim = input[0].dims;
             if (isMatMul)
             {
@@ -611,12 +611,12 @@ public:
         const std::vector<Ptr<BackendWrapper>>& outputs
     ) override
     {
+        auto biasMat_ = bias ? biasMat : Mat();
         auto context = reinterpret_cast<csl::CSLContext*>(context_);
         auto input_wrapper = inputs[0].dynamicCast<CUDABackendWrapper>();
 
         if (weightsMat.empty() || isMatMul)
         {
-            CV_Assert(!bias);
             int inp2Dim;
             // broadcast is not supported with CUDA
             if(weightsMat.empty())
@@ -627,13 +627,12 @@ public:
                 inp2Dim = oriMat.dims;
 
             if(input_wrapper->getRank() == inp2Dim)
-                return make_cuda_node<cuda4dnn::MatMulOp>(preferableTarget, std::move(context->stream), std::move(context->cublas_handle), oriMat);
+                return make_cuda_node<cuda4dnn::MatMulOp>(preferableTarget, std::move(context->stream), std::move(context->cublas_handle), oriMat, biasMat_, transA, transB);
             else
                 return Ptr<BackendNode>();
         }
 
         auto flatten_start_axis = normalize_axis(axis, input_wrapper->getRank());
-        auto biasMat_ = bias ? biasMat : Mat();
         return make_cuda_node<cuda4dnn::InnerProductOp>(preferableTarget, std::move(context->stream), std::move(context->cublas_handle), flatten_start_axis, weightsMat, biasMat_);
     }
 #endif
@@ -663,15 +662,15 @@ public:
     }
 
 #ifdef HAVE_CANN
-    virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputsWrapper, const int index, const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
+    virtual Ptr<BackendNode> initCann(const std::vector<Ptr<BackendWrapper> > &inputsWrapper,
+                                      const std::vector<Ptr<BackendNode> >& nodes) CV_OVERRIDE
     {
         auto x1 = inputsWrapper[0].dynamicCast<CannBackendWrapper>();
         auto x1_desc = x1->getTensorDesc();
         auto op_x1 = nodes[0].dynamicCast<CannBackendNode>()->getOp();
         auto output_desc = std::make_shared<ge::TensorDesc>(ge::Shape(), ge::FORMAT_NCHW, ge::DT_FLOAT);
 
-        std::string op_name = cv::format("matmul_%d", index);
-        auto op = std::make_shared<ge::op::MatMulV2>(op_name);
+        auto op = std::make_shared<ge::op::MatMulV2>(name);
 
         if (!blobs.empty()) // if B is const
         {
@@ -683,7 +682,7 @@ public:
 
             // set inputs
             // set inputs : x2 (weight)
-            auto op_const_weight = std::make_shared<CannConstOp>(weightsMat.data, weightsMat.type(), shape(weightsMat), cv::format("%s_w", op_name.c_str()));
+            auto op_const_weight = std::make_shared<CannConstOp>(weightsMat.data, weightsMat.type(), shape(weightsMat), cv::format("%s_w", name.c_str()));
             op->set_input_x2_by_name(*(op_const_weight->getOp()), "y");
             op->update_input_desc_x2(*(op_const_weight->getTensorDesc()));
         }
@@ -706,12 +705,12 @@ public:
 
         // set inputs
         // set inputs : x1 (input)
-        op->set_input_x1_by_name(*op_x1, "y");
+        op->set_input_x1_by_name(*op_x1, x1->name.c_str());
         op->update_input_desc_x1(*x1_desc);
         // set inputs : bias (bias)
         auto bias_mat = bias ? biasMat : Mat::zeros(1, weightsMat.size[0], weightsMat.type());
         std::vector<int> bias_shape{weightsMat.size[0]};
-        auto op_const_bias = std::make_shared<CannConstOp>(bias_mat.data, bias_mat.type(), bias_shape, cv::format("%s_b", op_name.c_str()));
+        auto op_const_bias = std::make_shared<CannConstOp>(bias_mat.data, bias_mat.type(), bias_shape, cv::format("%s_b", name.c_str()));
         op->set_input_bias(*(op_const_bias->getOp()));
         op->update_input_desc_bias(*(op_const_bias->getTensorDesc()));
 

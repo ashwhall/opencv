@@ -30,6 +30,27 @@ public:
         pb
     };
 
+    void testInputShapes(const Net& net, const std::vector<Mat>& inps)
+    {
+        std::vector<MatShape> inLayerShapes;
+        std::vector<MatShape> outLayerShapes;
+        net.getLayerShapes(MatShape(), 0, inLayerShapes, outLayerShapes);
+        ASSERT_EQ(inLayerShapes.size(), inps.size());
+
+        for (int i = 0; i < inps.size(); ++i) {
+            bool hasDynamicShapes = inLayerShapes[i].empty();
+            if (hasDynamicShapes)
+                continue;
+            if (inLayerShapes[i].size() == 1) {  // 1D input
+                ASSERT_EQ(shape(inLayerShapes[i][0], 1), shape(inps[i]));
+            } else {
+                // Compare all axes except batch dimension which is variable.
+                inLayerShapes[i][0] = inps[i].size[0];
+                ASSERT_EQ(inLayerShapes[i], shape(inps[i]));
+            }
+        }
+    }
+
     void testONNXModels(const String& basename, const Extension ext = npy,
                         const double l1 = 0, const float lInf = 0, const bool useSoftmax = false,
                         bool checkNoFallbacks = true, int numInps = 1)
@@ -53,6 +74,8 @@ public:
         checkBackend(&inps[0], &ref);
         Net net = readNetFromONNX(onnxmodel);
         ASSERT_FALSE(net.empty());
+
+        testInputShapes(net, inps);
 
         net.setPreferableBackend(backend);
         net.setPreferableTarget(target);
@@ -1726,6 +1749,16 @@ TEST_P(Test_ONNX_layers, ConvResizePool1d)
     testONNXModels("conv_resize_pool_1d");
 }
 
+TEST_P(Test_ONNX_layers, DepthWiseAdd)
+{
+    testONNXModels("depthwiseconv_add");
+}
+
+TEST_P(Test_ONNX_layers, DepthStride2)
+{
+    testONNXModels("depthwise_stride2");
+}
+
 TEST_P(Test_ONNX_layers, SubFromConst)
 {
     testONNXModels("sub_from_const1");
@@ -1743,6 +1776,11 @@ TEST_P(Test_ONNX_layers, Gemm)
     testONNXModels("gemm_no_transB");
     testONNXModels("gemm_transB_0");
     testONNXModels("gemm_first_const");
+}
+
+TEST_P(Test_ONNX_layers, Gemm_bias)
+{
+    testONNXModels("gemm_vector_bias");
 }
 
 TEST_P(Test_ONNX_layers, Quantized_Convolution)
@@ -2300,6 +2338,8 @@ TEST_P(Test_ONNX_nets, Resnet34_kinetics)
         lInf = 0.06;
     }
 
+    testInputShapes(net, {input0});
+
     checkBackend(&input0, &ref0);
     net.setInput(input0);
     Mat out = net.forward().clone();
@@ -2409,6 +2449,42 @@ TEST_P(Test_ONNX_layers, YOLOv7)
 TEST_P(Test_ONNX_layers, Tile)
 {
     testONNXModels("tile", pb);
+}
+
+TEST_P(Test_ONNX_layers, LayerNorm)
+{
+    testONNXModels("test_layer_normalization_2d_axis0", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_2d_axis1", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_2d_axis_negative_1", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_2d_axis_negative_2", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_3d_axis0_epsilon", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_3d_axis1_epsilon", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_3d_axis2_epsilon", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_3d_axis_negative_1_epsilon", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_3d_axis_negative_2_epsilon", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_3d_axis_negative_3_epsilon", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis0", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis1", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis2", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis3", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis_negative_1", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis_negative_2", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis_negative_3", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_4d_axis_negative_4", pb, 0, 0, false, true, 3);
+    testONNXModels("test_layer_normalization_default_axis", pb, 0, 0, false, true, 3);
+}
+
+// for testing graph simplification
+TEST_P(Test_ONNX_layers, LayerNormExpanded)
+{
+    testONNXModels("layer_norm_expanded");
+    testONNXModels("layer_norm_expanded_with_initializers");
+}
+
+TEST_P(Test_ONNX_layers, Gelu)
+{
+    testONNXModels("gelu");
+    testONNXModels("gelu_approximation");
 }
 
 INSTANTIATE_TEST_CASE_P(/**/, Test_ONNX_nets, dnnBackendsAndTargets());
